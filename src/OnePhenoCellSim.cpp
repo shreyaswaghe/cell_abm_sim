@@ -1,4 +1,5 @@
 #include <cmath>
+#include <iostream>
 
 #include "Applications/Definitions/functors.hpp"
 #include "Applications/NumericalIntegration/GaussLegendre.hpp"
@@ -43,27 +44,32 @@ void normalizeXY(real *x, uint halfN) {
 	}
 }
 
+using MatrixX2 = LinAlgebra::Matrix<real, 0, 2>;
 struct SWModel : public ODEIntegration::ODEDynamicsMatrix<real, 0, 2> {
    public:
-	using MatrixX2 = LinAlgebra::Matrix<real, 0, 2>;
-
 	// prelims
 	MorseKernel morse;
 	EuclideanDistance euclDist;
 	ChemicalCue cue;
 	Kernel kernel;
 
-	const uint numCells;
+	uint numCells;
+	// length units in micrometers
 	const real cellRadius = 10.0;
 	const real compDomainExtent = 500.0;
+	real cellMotility = 0.009;
+
+	// non-dimensional quantity
 	real morseCueWeight = 0.5;
-	MatrixX2 state;
 
-	SWModel()
-		: numCells(100), morse(MorseKernel(1, 1, 10, 20)) {
-			  // TODO: Initialize initial state in some way
-
-		  };
+	SWModel(ulong numCells
+			// TODO: also decide how to include morse kernel config here
+			)
+		: numCells(numCells), morse(MorseKernel(1, 1, 10, 20)) {
+		distanceMatrix.alloc(numCells, numCells);
+		morseForces.alloc(numCells * 2);
+		envForces.alloc(numCells * 2);
+	};
 	~SWModel() {};
 
 	void PreIntegration(MatrixX2 &x, real t) override {}
@@ -166,12 +172,66 @@ struct SWModel : public ODEIntegration::ODEDynamicsMatrix<real, 0, 2> {
 			dpolar[i] += morseCueWeight * morseForces[i] +
 						 (1 - morseCueWeight) * envForces[i];
 		}
+		for (uint i = 0; i < numCells * 2; i++) {
+			dpos[i] = cellMotility * polarities[i];
+		}
+	}
+
+	void recordObservations() {
+		// TODO: Implement how and what you want to record
 	}
 };
 
+void initializeCellState(MatrixX2 &state) {
+	// TOOD: Implement how and what your initial state looks like.
+	// For random numbers, look at swnumeric/Libraries/Random/Rngstreams.hpp
+	state.setZero();
+}
+
 int main() {
-	SWModel model;
-	ODEIntegration::RungeKutta45Matrix integrator(model, 0.001, 1e-4, 2, 1e-5,
-												  1e-5);
+	constexpr real timeEnd = 24 * 60 * 60;
+	constexpr real eventTime = 30 * 60;
+
+	constexpr real timeStepInit = 1e-3;
+	constexpr real timeStepMin = 1e-5;
+	constexpr real timeStepMax = 2;
+	constexpr real atol = 1e-5, rtol = 1e-5;
+
+	constexpr ulong numCells = 50;
+
+	// Initialize model how you see fit
+	SWModel model(numCells);
+
+	// Set up integrator for the model
+	ODEIntegration::RungeKutta45Matrix integrator(
+		model, timeStepInit, timeStepMin, timeStepMax, atol, rtol);
+
+	// Here, col 0 represents positions mapped as
+	// cell i -> [x, y] = [state(0, 2i), state(0, 2i + 1)]
+	// and col 1 represents unit polarization vectors R^2
+	// mapped similarly
+	MatrixX2 state(numCells * 2, 2);
+	MatrixX2 nextState(numCells * 2, 2);
+	initializeCellState(state);
+
+	real nextEventTime = eventTime;
+	for (real time = 0; time < timeEnd;) {
+		std::cout << "Integrating times " << time << " -> " << nextEventTime
+				  << std::endl;
+
+		nextState.setZero();
+		integrator(state, nextState, time, nextEventTime);
+		time = nextEventTime;
+
+		// you now have snapshots at both x_t and x_{t - eventTime} as nextState
+		// and state
+		// implement this as is interesting to you
+		model.recordObservations();
+
+		state = nextState;
+		nextEventTime += eventTime;
+	}
+
+	std::cout << "Ending simulation" << std::endl;
 	return 0;
 }
