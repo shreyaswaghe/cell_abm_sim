@@ -1,0 +1,3 @@
+[submodule "third_party/swnumeric"]
+	path = third_party/swnumeric
+	url = git@github.com:shreyaswaghe/swnumeric.git
